@@ -88,6 +88,30 @@ class Indicator(Base):
             self.firsttime = arrow.get(self.firsttime).datetime
 
 
+class Feed(Base):
+    __tablename__ = "feeds"
+
+    id = Column(Integer, primary_key=True)
+    feed_name = Column(UnicodeText, index=True)
+    feed_params_md5 = Column(Text)
+    file_path = Column(UnicodeText)
+    file_md5 = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+
+    def __init__(self, feed_name=None, feed_params=None, feed_params_md5=None, file_path=None, file_md5=None):
+
+        self.feed_name = feed_name
+        self.feed_params_md5 = feed_params_md5
+        self.file_path = file_path
+        self.file_md5 = file_md5
+
+        if PYVERSION == 2:
+            if self.file_path and isinstance(self.file_path, str):
+                self.file_path = unicode(self.file_path)
+
+            if self.feed_name and isinstance(self.feed_name, str):
+                self.feed_name = unicode(self.feed_name)
+        
 # http://www.pythoncentral.io/sqlalchemy-orm-examples/
 class Archiver(object):
     def __init__(self, dbfile=DB_FILE, autocommit=False, dictrows=True, **kwargs):
@@ -107,6 +131,7 @@ class Archiver(object):
         self.handle = scoped_session(self.handle)
         self._session = None
         self._tx_count = 0
+        self.feedcache = {}
 
         Base.metadata.create_all(self.engine)
 
@@ -134,6 +159,11 @@ class Archiver(object):
         self.memcache = {}
         self.memcached_provider = None
 
+        self.clear_feedcache()
+
+    def clear_feedcache(self):
+        self.feedcache = {}
+
     def cache_provider(self, provider):
         if self.memcached_provider == provider:
             return
@@ -151,6 +181,43 @@ class Archiver(object):
             self.memcache[i.indicator] = (i.group, i.tags, i.firsttime, i.lasttime)
 
         logger.info("Cached provider {} in memory, {} objects".format(provider, len(self.memcache)))
+
+    def cache_feed_from_db(self, feed_name, feed_params_md5, file_md5):
+        logger.info("Querying smrtdb for feed {}".format(feed_name))
+        q = self.handle().query(Feed) \
+            .filter_by(feed_params_md5=feed_params_md5) \
+            .order_by(desc(Feed.created_at)) 
+
+        q = q.options(load_only('feed_params_md5', 'file_md5'))
+        q = q.first()
+        
+        if q:
+            self.feedcache[q.feed_params_md5] = q.file_md5
+            logger.info("Cached feed {} in memory, {} objects".format(feed_name, len(self.feedcache)))
+            return q.file_md5
+        else:
+            logger.info('No smrtdb entry found for feed {}'.format(feed_name))
+            return None
+
+    def is_feed_archived(self, feed_name, feed_params_md5, file_md5):
+        # is current run of rule/feed already in mem and do its cache contents match that of prior run?
+        if self.feedcache.get(feed_params_md5) and self.feedcache[feed_params_md5] == file_md5:
+            return True
+        
+        # if not in mem, check if it's in smrtdb
+        prior_file_md5 = self.cache_feed_from_db(feed_name, feed_params_md5, file_md5)
+        
+        logger.info('Checking feed {} with rule md5 {}'.format(feed_name, feed_params_md5))
+
+        if prior_file_md5:
+            logger.info('Found matching feed {} params_md5 in feedcache. Checking to see if prior file contents the same'.format(feed_name))
+            if prior_file_md5 == file_md5:
+                logger.info('md5 file match for feed {} on lastrun and this run'.format(feed_name))
+                return True
+
+        # If we made it here, the latest feed is diff from last run.
+        logger.info('File md5s for feed {} different. Lastrun: {} this run: {}'.format(feed_name, prior_file_md5, file_md5))
+        return False
 
     def search(self, indicator):
         tags = indicator.tags
@@ -188,6 +255,21 @@ class Archiver(object):
 
         # If we made it here, the cached indicator is >= to the one in the feed.
         return True
+
+    def create_feed_record(self, feed_name, feed_params_md5, file_md5, cache_file_path):
+        logger.info('Creating record for feed {} rule_md5: {}, file_md5: {}'.format(feed_name, feed_params_md5, file_md5))
+
+        f = Feed(feed_name=feed_name, feed_params_md5=feed_params_md5, file_path=cache_file_path,
+                      file_md5=file_md5)
+
+        s = self.begin()
+        s.add(f)
+        s.commit()
+
+        # cache in mem
+        self.feedcache[feed_params_md5] = file_md5
+
+        return f.id
 
     def create(self, indicator):
         tags = indicator.tags
@@ -233,6 +315,10 @@ class Archiver(object):
         count = s.query(Indicator).filter(Indicator.created_at < date.datetime).delete()
         self.commit()
 
+        s = self.begin()
+        count = s.query(Feed).filter(Feed.created_at < date.datetime).delete()
+        self.commit()
+
         if AUTO_VACUUM:
             logger.info('running database vacuum')
             s.execute('PRAGMA incremental_vacuum')
@@ -255,8 +341,14 @@ class NOOPArchiver:
     def search(self, indicator):
         return False
 
+    def is_feed_archived(self, fetcher):
+        return False
+
     def create(self, indicator):
         pass
+
+    def create_feed_record(self, fetcher):
+        return -1
 
     def cleanup(self, days=180):
         return 0

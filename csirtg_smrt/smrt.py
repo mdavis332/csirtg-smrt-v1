@@ -131,11 +131,11 @@ class Smrt(object):
             for f in rule.feeds:
                 yield rule, f
 
-    def load_parser(self, rule, feed, limit=None, data=None, filters=None):
+    def load_parser(self, rule, feed, limit=None, data=None, filters=None, archiver=None):
         if isinstance(rule, str):
             rule = Rule(rule)
 
-        fetch = Fetcher(rule, feed, data=data, no_fetch=self.no_fetch, verify_ssl=self.verify_ssl, limit=limit)
+        fetch = Fetcher(rule, feed, data=data, no_fetch=self.no_fetch, verify_ssl=self.verify_ssl, limit=limit, archiver=archiver)
         self.last_cache = fetch.cache
 
         parser_name = rule.feeds[feed].get('parser') or rule.parser or PARSER_DEFAULT
@@ -261,8 +261,8 @@ class Smrt(object):
         for i in indicators:
             self._send_indicators(i)
     
-    def process(self, rule, feed, limit=None, data=None, filters=None):
-        parser = self.load_parser(rule, feed, limit=limit, data=data, filters=filters)
+    def process(self, rule, feed, limit=None, data=None, filters=None, archiver=None):
+        parser = self.load_parser(rule, feed, limit=limit, data=data, filters=filters, archiver=archiver)
 
         feed_indicators = parser.process()
 
@@ -331,7 +331,7 @@ def _run_smrt(options, **kwargs):
         for r, f in s.load_feeds(args.rule, feed=args.feed):
             logger.info('processing: {} - {}:{}'.format(args.rule, r.defaults['provider'], f))
             try:
-                for i in s.process(r, f, limit=args.limit, data=data, filters=filters):
+                for i in s.process(r, f, limit=args.limit, data=data, filters=filters, archiver=archiver):
                     if args.client == 'stdout':
                         indicators.append(i)
             except Exception as e:
@@ -435,7 +435,7 @@ def main():
     setup_logging(args)
     logger.info('loglevel is: {}'.format(logging.getLevelName(logger.getEffectiveLevel())))
 
-    setup_runtime_path(args.runtime_path)
+    setup_runtime_path(os.path.dirname(args.remember_path))
 
     verify_ssl = True
     if options.get('no_verify_ssl') or o.get('no_verify_ssl'):
