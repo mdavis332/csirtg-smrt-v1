@@ -341,13 +341,13 @@ class NOOPArchiver:
     def search(self, indicator):
         return False
 
-    def is_feed_archived(self, fetcher):
+    def is_feed_archived(self, feed_name, feed_params_md5, file_md5):
         return False
 
     def create(self, indicator):
         pass
 
-    def create_feed_record(self, fetcher):
+    def create_feed_record(self, feed_name, feed_params_md5, file_md5, cache_file_path):
         return -1
 
     def cleanup(self, days=180):
