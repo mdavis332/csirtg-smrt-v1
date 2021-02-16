@@ -10,6 +10,7 @@ import sys
 from time import sleep
 import arrow
 import requests
+import hashlib
 logging.getLogger('requests.packages.urllib3.connectionpool').setLevel(logging.DEBUG)
 
 RE_SUPPORTED_DECODE = re.compile("zip|lzf|lzma|xz|lzop")
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 class Fetcher(object):
 
-    def __init__(self, rule, feed, cache=SMRT_CACHE, data=None, no_fetch=False, verify_ssl=True, limit=None):
+    def __init__(self, rule, feed, cache=SMRT_CACHE, data=None, no_fetch=False, verify_ssl=True, limit=None, archiver=None):
 
         self.logger = logging.getLogger(__name__)
         self.feed = feed
@@ -41,6 +42,7 @@ class Fetcher(object):
         self.filters = None
         self.verify_ssl = verify_ssl
         self.limit = limit
+        self.feed_archiver = archiver
 
         if self.rule.remote:
             self.remote = self.rule.remote
@@ -121,6 +123,26 @@ class Fetcher(object):
             self.fetcher = 'http'
         else:
             self.fetcher = 'file'
+
+    def _get_formatted_name(self):
+        return '{}:{}'.format(self.rule.defaults.get('provider'), self.feed)
+
+    def is_feed_archived(self, feed_name, feed_params_md5, file_md5):
+        return self.feed_archiver.is_feed_archived(feed_name, feed_params_md5, file_md5)
+   
+    def is_feed_archived_with_log(self, feed_name, feed_params_md5, file_md5):
+        if self.is_feed_archived(feed_name, feed_params_md5, file_md5):
+            self.logger.info('skipping feed due to md5 match between lastrun file and this run: {}'.format(feed_name))
+            return True
+        else:
+            self.logger.info('processing feed: {}'.format(feed_name))
+            return False
+ 
+    def archive_feed(self, feed_name, feed_params_md5, file_md5):
+        cache_file_path = self.cache
+        log_id = self.feed_archiver.create_feed_record(feed_name, feed_params_md5, file_md5, cache_file_path)
+        self.logger.info('archived feed {} with id: {}'.format(feed_name, log_id))
+        return log_id
 
     def _process_data(self, split="\n", rstrip=True):
         if not isinstance(self.data, str):
@@ -220,6 +242,10 @@ class Fetcher(object):
             for block in resp.iter_content(1024):
                 f.write(block)
 
+    def get_cache_md5(self):
+        # get md5 hash of cached file
+        return hashlib.md5(open(self.cache, 'rb').read()).hexdigest()
+
     def _fetch(self):
 
         if self.filters:
@@ -267,6 +293,9 @@ class Fetcher(object):
         self._cache_write(s)
 
     def process(self, split="\n", rstrip=True):
+        feed_name = self._get_formatted_name()
+        feed_params_md5 = self.rule.md5(feed_name)
+
         if self.data:
             for d in self._process_data(split=split, rstrip=rstrip):
                 yield d
@@ -297,6 +326,11 @@ class Fetcher(object):
             except Exception as e:
                 logger.debug(e)
 
+            # skip processing if file contents md5 is same as lastrun
+            file_md5 = self.get_cache_md5()
+            if self.is_feed_archived_with_log(feed_name, feed_params_md5, file_md5):
+                return
+            
             for l in self._process_cache(split=split, rstrip=rstrip):
                 if rstrip:
                     l = l.rstrip()
@@ -313,6 +347,7 @@ class Fetcher(object):
 
                 yield l
 
+            self.archive_feed(feed_name, feed_params_md5, file_md5)
             return
 
         if self.fetcher == 'file':
@@ -327,6 +362,11 @@ class Fetcher(object):
                 if not found:
                     raise RuntimeError('unable to match file')
 
+            # skip processing if file contents md5 is same as lastrun
+            file_md5 = self.get_cache_md5()
+            if self.is_feed_archived_with_log(feed_name, feed_params_md5, file_md5):
+                return
+
             for l in self._process_cache(split=split, rstrip=rstrip):
                 if rstrip:
                     l = l.rstrip()
@@ -338,3 +378,5 @@ class Fetcher(object):
                         l = l.decode('latin-1')
 
                 yield l
+
+            self.archive_feed(feed_name, feed_params_md5, file_md5)

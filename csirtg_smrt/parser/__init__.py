@@ -1,3 +1,4 @@
+import copy
 import logging
 import re
 import math
@@ -82,7 +83,7 @@ class Parser(object):
             return True
 
     def _defaults(self):
-        defaults = self.rule.defaults
+        defaults = copy.deepcopy(self.rule.defaults)
 
         if self.rule.feeds[self.feed].get('defaults'):
             for d in self.rule.feeds[self.feed].get('defaults'):

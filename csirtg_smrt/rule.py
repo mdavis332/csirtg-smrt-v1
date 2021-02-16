@@ -3,7 +3,7 @@ import json
 import logging
 from csirtg_smrt.exceptions import RuleUnsupported
 import os
-
+import hashlib
 
 class Rule(dict):
 
@@ -63,6 +63,11 @@ class Rule(dict):
             self.token = os.getenv(self.token)
 
     def __repr__(self):
+        # consistent tag order necessary for getting a consistent rule md5
+        try:
+            self.defaults.get('tags').sort()
+        except:
+            pass
         return json.dumps({
             "defaults": self.defaults,
             "feeds": self.feeds,
@@ -80,3 +85,7 @@ class Rule(dict):
             'limit': self.limit,
             'token': self.token
         }, sort_keys=True, indent=4, separators=(',', ': '))
+
+    def md5(self, feed_name=None):
+        # get md5 hash of all rule params for quick comparison of changes
+        return hashlib.md5((repr(self) + feed_name).encode('utf-8')).hexdigest()
