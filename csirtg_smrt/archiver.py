@@ -309,14 +309,15 @@ class Archiver(object):
     def cleanup(self, days=CLEANUP_DAYS):
         days = int(days)
         date = arrow.utcnow()
-        date = date.shift(days=-days)
+        feed_date = date.shift(days=-1)
+        indicator_date = date.shift(days=-days)
 
         s = self.begin()
-        count = s.query(Indicator).filter(Indicator.created_at < date.datetime).delete()
+        count = s.query(Indicator).filter(Indicator.created_at < indicator_date.datetime).delete()
         self.commit()
 
         s = self.begin()
-        count = s.query(Feed).filter(Feed.created_at < date.datetime).delete()
+        count = s.query(Feed).filter(Feed.created_at < feed_date.datetime).delete()
         self.commit()
 
         if AUTO_VACUUM:
