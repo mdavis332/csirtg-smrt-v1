@@ -90,7 +90,7 @@ class Smrt(object):
         self.send_retries_wait = send_retries_wait
 
     def is_archived(self, indicator):
-        return self.archiver.search(indicator)
+        return self.archiver.search(indicator, self.goback)
 
     def archive(self, indicator):
         return self.archiver.create(indicator)
