@@ -158,7 +158,7 @@ class Archiver(object):
         self.memcache = {}
         self.memcached_provider = None
 
-    def _cache_provider(self, provider, goback=None):
+    def _cache_provider(self, provider):
         if self.memcached_provider == provider:
             return
 
@@ -169,10 +169,6 @@ class Archiver(object):
             q = session.query(Indicator) \
                 .filter_by(provider=provider) \
                 .order_by(Indicator.lasttime.desc(), Indicator.firsttime.desc(), Indicator.created_at.desc())
-            
-            if goback:
-                goback = goback.datetime
-                q = q.filter(Indicator.lasttime >= goback)
 
             q = q.options(load_only("indicator", "group", "tags", "firsttime", "lasttime"))
             q = q.yield_per(1000)
