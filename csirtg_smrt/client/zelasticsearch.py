@@ -69,7 +69,7 @@ class _ElasticSearch(Client):
             m.save('indicators-{}'.format(dt))
         return 'indicators-{}'.format(dt)
 
-    def indicators_create(self, data):
+    def indicators_create(self, data, **kwargs):
         index = self._create_index()
 
         doc = data.__dict__()

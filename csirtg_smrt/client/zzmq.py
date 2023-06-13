@@ -43,7 +43,7 @@ class _Zmq(object):
     def stop(self):
         self.socket.close()
 
-    def indicators_create(self, data):
+    def indicators_create(self, data, **kwargs):
         if isinstance(data, dict):
             data = Indicator(**data)
 

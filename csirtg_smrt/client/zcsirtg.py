@@ -35,7 +35,7 @@ class _Csirtg(Client):
     def stop(self):
         return True
 
-    def indicators_create(self, data):
+    def indicators_create(self, data, **kwargs):
 
         if not isinstance(data, list):
             data = [data]

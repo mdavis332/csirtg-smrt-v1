@@ -32,7 +32,7 @@ class _Zyre(object):
     def stop(self):
         self.client.stop_zyre()
 
-    def indicators_create(self, data):
+    def indicators_create(self, data, **kwargs):
         if isinstance(data, dict):
             data = Indicator(**data)
 

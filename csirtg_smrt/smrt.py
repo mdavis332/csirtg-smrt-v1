@@ -66,6 +66,7 @@ class Smrt(object):
         self.logger = logging.getLogger(__name__)
 
         self.client = None
+        self.client_name = client
         if client != 'stdout':
             plugin_path = os.path.join(os.path.dirname(__file__), 'client')
             if getattr(sys, 'frozen', False):
@@ -230,13 +231,13 @@ class Smrt(object):
                     raise e
             return False
 
-    def _send_indicators(self, indicators):
+    def _send_indicators(self, indicators, **kwargs):
         n = int(self.send_retries) - 1
         s = int(self.send_retries_wait)
         success = False
         while n > 0:
             try:
-                self.client.indicators_create(indicators)
+                self.client.indicators_create(indicators, **kwargs)
                 n = 0
                 success = True
             except Exception as e:
@@ -249,17 +250,17 @@ class Smrt(object):
         if not success:
             raise SubmissionFailure('unable reach remote node')
 
-    def send_indicators(self, indicators):
+    def send_indicators(self, indicators, **kwargs):
         if not self.client:
             return
 
-        if self.fireball:
+        if self.fireball or self.client_name == 'misp':
             self.logger.debug('flushing queue...')
-            self._send_indicators(indicators)
+            self._send_indicators(indicators, **kwargs)
             return
 
         for i in indicators:
-            self._send_indicators(i)
+            self._send_indicators(i, **kwargs)
     
     def process(self, rule, feed, limit=None, data=None, filters=None):
         parser = self.load_parser(rule, feed, limit=limit, data=data, filters=filters)
@@ -284,7 +285,7 @@ class Smrt(object):
         feed_indicators_batches = chunk(feed_indicators, int(FIREBALL_SIZE))
 
         for indicator_batch in feed_indicators_batches:
-            self.send_indicators(indicator_batch)
+            self.send_indicators(indicator_batch, rule=rule, feed=feed)
 
             for i in indicator_batch:
                 if self.is_archived_with_log(i):

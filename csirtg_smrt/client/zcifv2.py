@@ -97,7 +97,7 @@ class CIF(HTTPClient):
         body = json.loads(body.text)
         return body
 
-    def indicators_create(self, data):
+    def indicators_create(self, data, **kwargs):
         if not isinstance(data, list):
             data = [data]
 

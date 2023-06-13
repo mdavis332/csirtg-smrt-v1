@@ -105,3 +105,9 @@ class Rule(dict):
             'key_file': self.key_file,
             'cert_file': self.cert_file
         }, sort_keys=True, indent=4, separators=(',', ': '))
+
+    def items(self):
+        return json.loads(self.__repr__()).items()
+
+    def keys(self):
+        return json.loads(self.__repr__()).keys()
