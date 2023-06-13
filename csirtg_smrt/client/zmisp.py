@@ -83,18 +83,18 @@ class MISP(Client):
         self.rule = dict(kwargs['rule'].items())
         self.event = {}
         self.attribute = {}
-        feed = kwargs.get('feed', '')
+        self.feed = kwargs.get('feed', '')
         rule_event = self.rule.get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('event', {})
-        feed_event = self.rule.get(feed, {}).get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('event', {})
+        feed_event = self.rule.get(self.feed, {}).get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('event', {})
         rule_attr = self.rule.get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('attribute', {})
-        feed_attr = self.rule.get(feed, {}).get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('attribute', {})
+        feed_attr = self.rule.get(self.feed, {}).get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('attribute', {})
         # merge 2 dicts giving priority to kv's in last merged (feed-level)
         self.event = rule_event | feed_event
         self.attribute = rule_attr | feed_attr
 
         # if whole feed is same misp attrib type, allow manual input and don't resolve each
-        self.misp_attrib_type = self.rule.get(feed, {}).get('itype') or \
-           self.rule.get(feed, {}).get('defaults', {}).get('itype') or self.rule.get('itype')
+        self.misp_attrib_type = self.rule.get(self.feed, {}).get('itype') or \
+           self.rule.get(self.feed, {}).get('defaults', {}).get('itype') or self.rule.get('itype')
 
     def _get_misp_event(self):
         '''fetches the MISP event to which attributes should be added. if one is not specified or
@@ -123,9 +123,20 @@ class MISP(Client):
                 continue
             setattr(event, setting, value)
 
-        # MISP api contract requires the "info" field
-        if not getattr(event, 'info', None):
-            event.info = self.rule.get('remote')
+        if self.new_event:
+            # MISP api contract requires the "info" field
+            if not getattr(event, 'info', None):
+                event.info = self.rule.get(self.feed, {}).get('defaults', {}).get('provider') or \
+                    self.rule.get('defaults', {}).get('provider')
+
+            reference = self.rule.get(self.feed, {}).get('defaults', {}).get('reference') or \
+                self.rule.get('defaults', {}).get('reference')
+            if reference:
+                event.add_attribute(**{'type': 'link', 'value': reference})
+
+            # in MISP, it's customary to designate TLP at Event level rather than Attrib level
+            tlp = self.rule.get('defaults', {}).get('tlp', 'amber')
+            event.add_tag('tlp:{}'.format(tlp))
 
         return event
 
@@ -146,10 +157,10 @@ class MISP(Client):
         misp_indicator.first_seen = cif_i.firsttime
         misp_indicator.last_seen = cif_i.lasttime
         misp_indicator.comment = cif_i.description
-        misp_indicator.add_tag('tlp:{}'.format(cif_i.tlp))
 
-        for tag in cif_i.tags:
-            misp_indicator.add_tag(tag)
+        if cif_i.tags:
+            for tag in cif_i.tags:
+                misp_indicator.add_tag(tag)
 
         # check for rule- or feed-wide static type
         if not self.misp_attrib_type:
