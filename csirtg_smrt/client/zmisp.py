@@ -43,7 +43,7 @@ If
 
 import logging
 
-from pymisp import PyMISP, MISPEvent, MISPAttribute
+from pymisp import PyMISP, MISPEvent, MISPAttribute, MISPOrganisation
 from csirtg_indicator.exceptions import InvalidIndicator
 from csirtg_smrt.client.plugin import Client
 
@@ -129,14 +129,41 @@ class MISP(Client):
                 event.info = self.rule.get(self.feed, {}).get('defaults', {}).get('provider') or \
                     self.rule.get('defaults', {}).get('provider')
 
+            # reject remote sync edits
+            # https://github.com/MISP/PyMISP/issues/239
+            event.locked = True
+            
             reference = self.rule.get(self.feed, {}).get('defaults', {}).get('reference') or \
                 self.rule.get('defaults', {}).get('reference')
             if reference:
                 event.add_attribute(**{'type': 'link', 'value': reference})
+                event.add_tag('source:{}'.format(reference))
 
             # in MISP, it's customary to designate TLP at Event level rather than Attrib level
             tlp = self.rule.get('defaults', {}).get('tlp', 'amber')
             event.add_tag('tlp:{}'.format(tlp))
+
+            if getattr(event, 'orgc_id', None) and event.orgc_id == 'provider':
+                event.orgc_id = None
+                # Set orgc from provider field
+                # does orgc already exist?
+                instance_orgs = self.client.organisations()
+                for org in instance_orgs:
+                    if org['Organisation']['name'] == self.rule['defaults']['provider']:
+                        orgc = MISPOrganisation()
+                        orgc.id = org['Organisation']['id']
+                        orgc.name = org['Organisation']['name']
+                        orgc.uuid = org['Organisation']['uuid']
+                        event.orgc = orgc
+                        break
+                
+                # if orgc doesn't exist yet
+                if not getattr(event, 'orgc', None):
+                    orgc = MISPOrganisation()
+                    orgc.name = self.rule['defaults']['provider']
+                    orgc_resp = self.client.add_organisation(orgc)
+                    orgc = orgc.from_dict(**orgc_resp['Organisation'])
+                    event.orgc = orgc
 
         return event
 
