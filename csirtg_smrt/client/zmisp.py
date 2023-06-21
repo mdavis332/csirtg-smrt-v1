@@ -4,6 +4,12 @@ cli launch should look like the following:
 > csirtg-smrt --skip-invalid --client misp --rule ~/push_to_misp.yml --remote http://<misp> \
   --token <MISP_write_token>
 
+The MISP API token must have a role with the following permissions:
+  - Auth key access (to use the API)
+  - Tagger (to attach tags)
+  - Tag Editor (to create new tags if necessary)
+  - Site Admin (only if you want creator org spoofing -- see below)
+
 Standard smrt rule fields like "tags" can be placed at the rule-level or feed-level like normal. Rule-level
   fields will be applied to all attributes for all feeds. Feed-level key/values will be applied on a
   per-feed basis. e.g., in the below rule, the "ips" feed will inherit the rule-wide TLP:CLEAR and "testing"
@@ -38,7 +44,24 @@ Smrt rules for the MISP client can have a "to_misp" key under the rule-level or 
 If no destination event id field is specified in the rule, then a new event will be created in MISP
   for every fireball batch (default every 100 indicators)
 
-If 
+If you want to spoof the provider into the "creator org" field of the MISP event, specify "provider"
+  in the event dict of the yml rule. e.g.,
+  remote: http://danger.rulez.sk/projects/bruteforceblocker/blist.php
+  defaults:
+    provider: danger.rulez.sk
+    reference: http://danger.rulez.sk/projects/bruteforceblocker/blist.php
+    tlp: clear
+    to_misp:
+        event:
+        orgc_id: provider
+        tags:
+            - bruteforce
+
+  Doing the above requires the MISP API token to have Site Admin permissions so it can create new Orgs.
+  In the case above, the client will see if "danger.rulez.sk" is already an Org listed on the target MISP
+  instance. If so, it will use the existing Org ID when creating the event. If not, it will create a new
+  org named "danger.rulez.sk" (or whatever's in the provider field), and set that on the event.
+
 '''
 
 import logging
@@ -163,6 +186,7 @@ class MISP(Client):
                 if not getattr(event, 'orgc', None):
                     orgc = MISPOrganisation()
                     orgc.name = self.rule['defaults']['provider']
+                    orgc.description = 'created by csirtg-smrt'
                     orgc_resp = self.client.add_organisation(orgc)
                     orgc = orgc.from_dict(**orgc_resp['Organisation'])
                     event.orgc = orgc
