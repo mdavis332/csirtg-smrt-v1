@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker, scoped_session, load_only
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from csirtg_smrt.constants import PYVERSION, RUNTIME_PATH, CACHE_PATH
+from sqlalchemy.sql import text
 from sqlalchemy.sql.expression import func
 from contextlib import contextmanager
 from pprint import pprint
@@ -170,7 +171,8 @@ class Archiver(object):
                 .filter_by(provider=provider) \
                 .order_by(Indicator.lasttime.desc(), Indicator.firsttime.desc(), Indicator.created_at.desc())
 
-            q = q.options(load_only("indicator", "group", "tags", "firsttime", "lasttime"))
+            q = q.options(load_only(Indicator.indicator, Indicator.group, Indicator.tags, 
+                Indicator.firsttime, Indicator.lasttime))
             q = q.yield_per(1000)
             for i in q:
                 if i.indicator not in self.memcache:
@@ -261,12 +263,12 @@ class Archiver(object):
             count = session.query(Indicator) \
                 .filter(Indicator.created_at < indicator_date.datetime).delete()
 
-        if AUTO_VACUUM:
-            logger.info('running database vacuum')
-            self.engine.execute('PRAGMA incremental_vacuum')
-            self.engine.execute('VACUUM')
-
-        self.engine.execute('PRAGMA optimize')
+        with self.engine.connect() as conn:
+            if AUTO_VACUUM:
+                logger.info('running database vacuum')
+                conn.execute(text('PRAGMA incremental_vacuum'))
+                conn.execute(text('VACUUM'))
+            conn.execute(text('PRAGMA optimize'))
 
         self.engine.dispose()
         self.engine = None
