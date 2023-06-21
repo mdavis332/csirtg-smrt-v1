@@ -71,6 +71,8 @@ class MISP(Client):
 
         super().__init__(remote, token)
         self.verify_ssl = kwargs.get('verify_ssl', True)
+        # disable pymisp's default debug logging
+        logging.getLogger('pymisp').setLevel(logging.WARNING)
         self.client = PyMISP(remote, token, self.verify_ssl, 'json')
         
     def start(self):
@@ -205,6 +207,7 @@ class MISP(Client):
         return misp_indicator
 
     def indicators_create(self, data, **kwargs):
+        logging.getLogger('pymisp').setLevel(logging.WARNING)
         self._load_misp_settings_from_smrt_rule(**kwargs)
         misp_event = self._get_misp_event()
 
