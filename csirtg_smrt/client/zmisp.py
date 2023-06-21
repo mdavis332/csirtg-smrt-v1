@@ -161,7 +161,6 @@ class MISP(Client):
             reference = self.rule.get(self.feed, {}).get('defaults', {}).get('reference') or \
                 self.rule.get('defaults', {}).get('reference')
             if reference:
-                event.add_attribute(**{'type': 'link', 'value': reference})
                 event.add_tag('source:{}'.format(reference))
 
             # in MISP, it's customary to designate TLP at Event level rather than Attrib level
