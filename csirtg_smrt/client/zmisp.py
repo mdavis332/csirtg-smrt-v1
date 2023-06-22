@@ -38,22 +38,27 @@ Smrt rules for the MISP client can have a "to_misp" key under the rule-level or 
       attribute:
         to_ids: True
       event:
-        id: 1234
+        uuid: eca64394-2895-65ac-475a-b4f81ba41698
         published: 1
 
-If no destination event id field is specified in the rule, then a new event will be created in MISP
-  for every fireball batch (default every 100 indicators)
+If no destination event uuid field is specified in the rule, then a new event will be created in MISP
+  for every fireball batch (default every 100 indicators). The 'uuid' field under event will also accept
+  the following human datetime strings: hour, day, week, or month. If used, the resultant timestamp (beginning
+   of the hour, day, week, or month) will be used to create the same deterministic uuidv4. In this way,
+   specifying 'day' for uuid will result in all those indicators from each smrt run going into the same MISP
+   event for that day. Specifying 'week' will ensure all indicators go in the same event for that week, etc.
 
-If you want to spoof the provider into the "creator org" field of the MISP event, specify "provider"
-  in the event dict of the yml rule. e.g.,
+If you want to spoof the "creator org" field of the MISP event, you can specify an arbitrary str or 
+  reuse the 'provider' field by employing the 'eval()' func in the event dict of the yml rule under
+  orgc_id. e.g.,
   remote: http://danger.rulez.sk/projects/bruteforceblocker/blist.php
   defaults:
     provider: danger.rulez.sk
     reference: http://danger.rulez.sk/projects/bruteforceblocker/blist.php
     tlp: clear
     to_misp:
-        event:
-        orgc_id: provider
+      event:
+        orgc_id: eval("{provider}".format(**obs))
         tags:
             - bruteforce
 
@@ -68,7 +73,10 @@ import logging
 
 from pymisp import PyMISP, MISPEvent, MISPAttribute, MISPOrganisation
 from csirtg_indicator.exceptions import InvalidIndicator
+from csirtg_indicator.utils import parse_timestamp
 from csirtg_smrt.client.plugin import Client
+from hashlib import md5
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -88,15 +96,18 @@ CIF_TO_MISP_TYPES = {
 
 SMRT_RULE_MISP_TOPLEVEL = 'to_misp'
 
+HUMAN_TS = {'hour', 'day', 'week', 'month'}
+
 class MISP(Client):
 
     def __init__(self, remote, token, **kwargs):
 
         super().__init__(remote, token)
         self.verify_ssl = kwargs.get('verify_ssl', True)
-        # disable pymisp's default debug logging
-        logging.getLogger('pymisp').setLevel(logging.WARNING)
-        self.client = PyMISP(remote, token, self.verify_ssl, 'json')
+        debug = False
+        if logger.level == logging.DEBUG:
+            debug = True
+        self.client = PyMISP(remote, token, self.verify_ssl, debug=debug, tool='csirtg-smrt')
         
     def start(self):
         return True
@@ -106,6 +117,8 @@ class MISP(Client):
 
     def _load_misp_settings_from_smrt_rule(self, **kwargs):
         self.rule = dict(kwargs['rule'].items())
+        # handle any 'eval's in the rule
+        self.rule['defaults'] = kwargs['parser'].eval_obs(self.rule.get('defaults', {}))
         self.event = {}
         self.attribute = {}
         self.feed = kwargs.get('feed', '')
@@ -121,24 +134,46 @@ class MISP(Client):
         self.misp_attrib_type = self.rule.get(self.feed, {}).get('itype') or \
            self.rule.get(self.feed, {}).get('defaults', {}).get('itype') or self.rule.get('itype')
 
+    def _set_event_id(self, event_id=None):
+        if not event_id:
+            return -1
+        
+        # always return same UUIDv4 for same timestamp
+        if event_id in HUMAN_TS:
+            event_id = str(UUID(md5(str(parse_timestamp(event_id)).encode('utf-8')).hexdigest(), version=4))
+            self.event['uuid'] = event_id
+
+        # ensure valid UUID
+        try:
+            _ = isinstance(UUID(event_id), UUID)
+        except ValueError:
+            return -1
+
+        return event_id
+    
     def _get_misp_event(self):
         '''fetches the MISP event to which attributes should be added. if one is not specified or
         doesn't exist, a new event is created.
         input: None
         output: MISPEvent() object
         '''
-        dst_event_id = self.event.get('id', -1)
-        event = self.client.get_event(dst_event_id, pythonify=True)
+        dst_event_id = self._set_event_id(self.event.get('uuid'))
         self.new_event = False
-
+        # do this to suppress error if event not found
+        log_level = logging.getLogger('pymisp').level
+        logging.getLogger('pymisp').setLevel(logging.CRITICAL)
+        event = self.client.get_event(dst_event_id, pythonify=True)
+        logging.getLogger('pymisp').setLevel(log_level)
+        
         # if event doesn't exist, create new one
         if event.get('errors'):
-            event = MISPEvent()
-            self.new_event = True
+            if event.get('errors', tuple())[0] == 404:
+                event = MISPEvent()
+                self.new_event = True
+            else:
+                raise Exception(event)
 
         for setting, value in self.event.items():
-            if setting == 'id':
-                continue
             if setting == 'tags':
                 tags = value
                 if not isinstance(tags, list):
@@ -167,13 +202,15 @@ class MISP(Client):
             tlp = self.rule.get('defaults', {}).get('tlp', 'amber')
             event.add_tag('tlp:{}'.format(tlp))
 
-            if getattr(event, 'orgc_id', None) and event.orgc_id == 'provider':
+            # handle spoofing a provided name
+            if getattr(event, 'orgc_id', None) and not isinstance(event.orgc_id, int):
+                provider = event.orgc_id
                 event.orgc_id = None
                 # Set orgc from provider field
                 # does orgc already exist?
                 instance_orgs = self.client.organisations()
                 for org in instance_orgs:
-                    if org['Organisation']['name'] == self.rule['defaults']['provider']:
+                    if org['Organisation']['name'] == provider:
                         orgc = MISPOrganisation()
                         orgc.id = org['Organisation']['id']
                         orgc.name = org['Organisation']['name']
@@ -184,7 +221,7 @@ class MISP(Client):
                 # if orgc doesn't exist yet
                 if not getattr(event, 'orgc', None):
                     orgc = MISPOrganisation()
-                    orgc.name = self.rule['defaults']['provider']
+                    orgc.name = provider
                     orgc.description = 'created by csirtg-smrt'
                     orgc_resp = self.client.add_organisation(orgc)
                     orgc = orgc.from_dict(**orgc_resp['Organisation'])
@@ -230,7 +267,6 @@ class MISP(Client):
         return misp_indicator
 
     def indicators_create(self, data, **kwargs):
-        logging.getLogger('pymisp').setLevel(logging.WARNING)
         self._load_misp_settings_from_smrt_rule(**kwargs)
         misp_event = self._get_misp_event()
 
