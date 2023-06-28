@@ -43,10 +43,12 @@ Smrt rules for the MISP client can have a "to_misp" key under the rule-level or 
 
 If no destination event uuid field is specified in the rule, then a new event will be created in MISP
   for every fireball batch (default every 100 indicators). The 'uuid' field under event will also accept
-  the following human datetime strings: hour, day, week, or month. If used, the resultant timestamp (beginning
-   of the hour, day, week, or month) will be used to create the same deterministic uuidv4. In this way,
-   specifying 'day' for uuid will result in all those indicators from each smrt run going into the same MISP
-   event for that day. Specifying 'week' will ensure all indicators go in the same event for that week, etc.
+  the following human datetime strings: hour, day, week, month, or permanent. If used, the resultant 
+  timestamp (beginning of the hour, day, week, or month) will be used to create the same deterministic 
+  uuidv4. In this way, specifying 'day' for uuid will result in all those indicators from each smrt run 
+  going into the same MISP event for that day. Specifying 'week' will ensure all indicators go in the same
+  event for that week, etc. If 'permanent' is specified, a uuid is deterministically created from the
+  provider and feed name, so the target MISP UUID should always be the same unless those change.
 
 If you want to spoof the "creator org" field of the MISP event, you can specify an arbitrary str or 
   reuse the 'provider' field by employing the 'eval()' func in the event dict of the yml rule under
@@ -73,7 +75,7 @@ import logging
 
 from pymisp import PyMISP, MISPEvent, MISPAttribute, MISPOrganisation
 from csirtg_indicator.exceptions import InvalidIndicator
-from csirtg_indicator.utils import parse_timestamp
+from csirtg_indicator.utils.ztime import parse_timestamp
 from csirtg_smrt.client.plugin import Client
 from hashlib import md5
 from uuid import UUID
@@ -96,7 +98,7 @@ CIF_TO_MISP_TYPES = {
 
 SMRT_RULE_MISP_TOPLEVEL = 'to_misp'
 
-HUMAN_TS = {'hour', 'day', 'week', 'month'}
+HUMAN_TS = {'hour', 'day', 'week', 'month', 'permanent'}
 
 class MISP(Client):
 
@@ -140,7 +142,13 @@ class MISP(Client):
         
         # always return same UUIDv4 for same timestamp
         if event_id in HUMAN_TS:
-            event_id = str(UUID(md5(str(parse_timestamp(event_id)).encode('utf-8')).hexdigest(), version=4))
+            if event_id != 'permanent':
+                event_id = str(UUID(md5(str(parse_timestamp(event_id)).encode('utf-8')).hexdigest(), version=4))
+            else:
+                # arbitrarily pick semi-static fields and order to create a hash/uuid
+                # in this case, we use the format provider:feed_name, e.g., nixspam.net:ssh
+                hash_candidate = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
+                event_id = str(UUID(md5(hash_candidate)))
             self.event['uuid'] = event_id
 
         # ensure valid UUID
