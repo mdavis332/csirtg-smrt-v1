@@ -253,7 +253,7 @@ class MISP(Client):
         misp_indicator.value = cif_i.indicator
         misp_indicator.first_seen = cif_i.firsttime
         misp_indicator.last_seen = cif_i.lasttime
-        misp_indicator.comment = cif_i.description
+        misp_indicator.comment = '|'.join([cif_i.description, cif_i.reference]) if cif_i.reference else cif_i.description
 
         if cif_i.tags:
             for tag in cif_i.tags:
