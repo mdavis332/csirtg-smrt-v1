@@ -50,8 +50,8 @@ If no destination event uuid field is specified in the rule, then a new event wi
   event for that week, etc. If 'permanent' is specified, a uuid is deterministically created from the
   provider and feed name, so the target MISP UUID should always be the same unless those change.
 
-If you want to spoof the "creator org" field of the MISP event, you can specify an arbitrary str or 
-  reuse the 'provider' field by employing the 'eval()' func in the event dict of the yml rule under
+If you want to spoof the "creator org" field of the MISP event, you can specify an arbitrary str like 
+  the 'provider' in the event dict of the yml rule under
   orgc_id. e.g.,
   remote: http://danger.rulez.sk/projects/bruteforceblocker/blist.php
   defaults:
@@ -60,7 +60,7 @@ If you want to spoof the "creator org" field of the MISP event, you can specify 
     tlp: clear
     to_misp:
       event:
-        orgc_id: eval("{provider}".format(**obs))
+        orgc_id: danger.rulez.sk
         tags:
             - bruteforce
 
@@ -120,21 +120,31 @@ class MISP(Client):
     def _load_misp_settings_from_smrt_rule(self, **kwargs):
         self.rule = dict(kwargs['rule'].items())
         # handle any 'eval's in the rule
-        self.rule['defaults'] = kwargs['parser'].eval_obs(self.rule.get('defaults', {}))
+        #self.rule['defaults'] = kwargs['parser'].eval_obs(self.rule.get('defaults', {}))
         self.event = {}
         self.attribute = {}
         self.feed = kwargs.get('feed', '')
-        rule_event = self.rule.get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('event', {})
-        feed_event = self.rule.get(self.feed, {}).get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('event', {})
-        rule_attr = self.rule.get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('attribute', {})
-        feed_attr = self.rule.get(self.feed, {}).get('defaults', {}).get(SMRT_RULE_MISP_TOPLEVEL, {}).get('attribute', {})
+        self.feed_defaults = self.rule['feeds'][self.feed].get('defaults', {})
+        self.rule_defaults = self.rule.get('defaults', {})
+        self.remote = self.rule['feeds'][self.feed].get('remote') or self.rule.get('remote')
+        rule_event = self.rule_defaults.get(SMRT_RULE_MISP_TOPLEVEL, {}).get('event', {})
+        feed_event = self.feed_defaults.get(SMRT_RULE_MISP_TOPLEVEL, {}).get('event', {})
+        rule_attr = self.rule_defaults.get(SMRT_RULE_MISP_TOPLEVEL, {}).get('attribute', {})
+        feed_attr = self.feed_defaults.get(SMRT_RULE_MISP_TOPLEVEL, {}).get('attribute', {})
         # merge 2 dicts giving priority to kv's in last merged (feed-level)
         self.event = rule_event | feed_event
         self.attribute = rule_attr | feed_attr
 
+        rule_tags = self.rule_defaults.get('tags', [])
+        feed_tags = self.feed_defaults.get('tags', [])
+
+        self.tags = feed_tags or rule_tags
+        if not isinstance(self.tags, list):
+            self.tags = [self.tags]
+
         # if whole feed is same misp attrib type, allow manual input and don't resolve each
-        self.misp_attrib_type = self.rule.get(self.feed, {}).get('itype') or \
-           self.rule.get(self.feed, {}).get('defaults', {}).get('itype') or self.rule.get('itype')
+        self.misp_attrib_type = self.rule['feeds'][self.feed].get('itype') or \
+           self.feed_defaults.get('itype') or self.rule.get('itype') or self.rule_defaults.get('itype')
 
     def _set_event_id(self, event_id=None):
         if not event_id:
@@ -148,7 +158,7 @@ class MISP(Client):
                 # arbitrarily pick semi-static fields and order to create a hash/uuid
                 # in this case, we use the format provider:feed_name, e.g., nixspam.net:ssh
                 hash_candidate = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
-                event_id = str(UUID(md5(hash_candidate.encode('utf-8')).hexdigest()))
+                event_id = str(UUID(md5(hash_candidate.encode('utf-8')).hexdigest(), version=4))
             self.event['uuid'] = event_id
 
         # ensure valid UUID
@@ -181,6 +191,13 @@ class MISP(Client):
             else:
                 raise Exception(event)
 
+        event.add_tag('source:{}'.format(self.remote))
+
+        # handle normal smrt rule tags (not those in to_misp section)
+        if self.tags and not self.event.get('tags'):
+            for tag in self.tags:
+                event.add_tag(tag)
+
         for setting, value in self.event.items():
             if setting == 'tags':
                 tags = value
@@ -194,20 +211,14 @@ class MISP(Client):
         if self.new_event:
             # MISP api contract requires the "info" field
             if not getattr(event, 'info', None):
-                event.info = self.rule.get(self.feed, {}).get('defaults', {}).get('provider') or \
-                    self.rule.get('defaults', {}).get('provider')
+                event.info = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
 
             # reject remote sync edits
             # https://github.com/MISP/PyMISP/issues/239
             event.locked = True
-            
-            reference = self.rule.get(self.feed, {}).get('defaults', {}).get('reference') or \
-                self.rule.get('defaults', {}).get('reference')
-            if reference:
-                event.add_tag('source:{}'.format(reference))
 
             # in MISP, it's customary to designate TLP at Event level rather than Attrib level
-            tlp = self.rule.get('defaults', {}).get('tlp', 'amber')
+            tlp = self.rule_defaults.get('tlp', 'amber')
             event.add_tag('tlp:{}'.format(tlp))
 
             # handle spoofing a provided name
@@ -251,18 +262,20 @@ class MISP(Client):
         '''
         misp_indicator = MISPAttribute()
         misp_indicator.value = cif_i.indicator
-        misp_indicator.first_seen = cif_i.firsttime
-        misp_indicator.last_seen = cif_i.lasttime
+        if cif_i.firsttime:
+            misp_indicator.first_seen = cif_i.firsttime
+        if cif_i.lasttime:
+            misp_indicator.last_seen = cif_i.lasttime
+        if not cif_i.description:
+            cif_i.description = '' 
         misp_indicator.comment = '|'.join([cif_i.description, cif_i.reference]) if cif_i.reference else cif_i.description
-
-        if cif_i.tags:
-            for tag in cif_i.tags:
-                misp_indicator.add_tag(tag)
 
         # check for rule- or feed-wide static type
         if not self.misp_attrib_type:
             cif_itype = cif_i.itype
             misp_type = CIF_TO_MISP_TYPES[cif_itype]
+            if misp_type == 'md5' and 'imphash' in cif_i.tags:
+                misp_type = 'imphash'
         misp_indicator.type = self.misp_attrib_type or misp_type
 
         for setting, value in self.attribute.items():
