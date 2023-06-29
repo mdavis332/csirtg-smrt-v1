@@ -148,7 +148,7 @@ class MISP(Client):
                 # arbitrarily pick semi-static fields and order to create a hash/uuid
                 # in this case, we use the format provider:feed_name, e.g., nixspam.net:ssh
                 hash_candidate = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
-                event_id = str(UUID(md5(hash_candidate)))
+                event_id = str(UUID(md5(hash_candidate.encode('utf-8')).hexdigest()))
             self.event['uuid'] = event_id
 
         # ensure valid UUID
