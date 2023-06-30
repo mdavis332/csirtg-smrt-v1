@@ -42,7 +42,7 @@ class Fetcher(object):
         self.verify_ssl = verify_ssl
         self.limit = limit
 
-        if not self.verify:
+        if not self.verify_ssl:
             requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
 
         if self.rule.remote:
