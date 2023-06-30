@@ -86,7 +86,7 @@ CIF_TO_MISP_TYPES = {
     'ipv4': 'ip-src',
     'ipv6': 'ip-src',
     'asn': 'AS',
-    'fqdn': 'domain',
+    'fqdn': 'hostname',
     'email': 'email',
     'md5': 'md5',
     'sha1': 'sha1',
@@ -260,10 +260,17 @@ class MISP(Client):
 
         # check for rule- or feed-wide static type
         if not self.misp_attrib_type:
-            cif_itype = cif_i.itype
-            misp_type = CIF_TO_MISP_TYPES[cif_itype]
+            misp_type = CIF_TO_MISP_TYPES[cif_i.itype]
             if misp_type == 'md5' and cif_i.tags and 'imphash' in cif_i.tags:
                 misp_type = 'imphash'
+
+        if cif_i.portlist and len(cif_i.portlist.split(',')) == 1 and len(cif_i.portlist.split('-')) == 1:
+            misp_indicator.value = '{}|{}'.format(misp_indicator.value, cif_i.portlist)
+            if cif_i.itype in ['ipv4', 'ipv6']:
+                misp_type = 'ip-dst|port'
+            elif cif_i.itype == 'fqdn':
+                mis_type = 'hostname|port'
+        
         misp_indicator.type = self.misp_attrib_type or misp_type
 
         for setting, value in self.attribute.items():
