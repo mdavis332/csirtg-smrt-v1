@@ -1,3 +1,4 @@
+import arrow
 import copy
 import logging
 import re
@@ -118,14 +119,14 @@ class Parser(object):
             try:
                 m = re.match('^eval\((.*)\)$', value.strip(), re.MULTILINE | re.DOTALL)
                 if m:
-                    value = eval(m.group(1),{"__builtins__":None, 'math': math, 'max': max, 'min': min, 'int': int, 'float': float, 'str': str, 'unicode': bytes},{'obs': obs})
+                    value = eval(m.group(1),{"__builtins__":None, 'arrow': arrow, 'math': math, 'max': max, 'min': min, 'int': int, 'float': float, 'str': str, 'unicode': bytes},{'obs': obs})
             except Exception as e:
                 self.logger.warn('Could not evaluate expression "{}", exception: {}'.format(value, e))
         elif PYVERSION == 2 and isinstance(value, (str, unicode)):
             try:
                 m = re.match('^eval\((.*)\)$', value.strip(), re.MULTILINE | re.DOTALL)
                 if m:
-                    value = eval(m.group(1),{"__builtins__":None, 'math': math, 'max': max, 'min': min, 'int': int, 'float': float, 'str': str, 'unicode': unicode},{'obs': obs})
+                    value = eval(m.group(1),{"__builtins__":None, 'arrow': arrow, 'math': math, 'max': max, 'min': min, 'int': int, 'float': float, 'str': str, 'unicode': unicode},{'obs': obs})
             except Exception as e:
                 self.logger.warn('Could not evaluate expression "{}", exception: {}'.format(value, e))
 
