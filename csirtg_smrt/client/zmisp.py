@@ -264,12 +264,16 @@ class MISP(Client):
             if misp_type == 'md5' and cif_i.tags and 'imphash' in cif_i.tags:
                 misp_type = 'imphash'
 
-        if cif_i.portlist and len(cif_i.portlist.split(',')) == 1 and len(cif_i.portlist.split('-')) == 1:
-            misp_indicator.value = '{}|{}'.format(misp_indicator.value, cif_i.portlist)
-            if cif_i.itype in ['ipv4', 'ipv6']:
-                misp_type = 'ip-dst|port'
-            elif cif_i.itype == 'fqdn':
-                mis_type = 'hostname|port'
+        if cif_i.portlist:
+            if isinstance(cif_i.portlist, int):
+                cif_i.portlist = str(cif_i.portlist)
+                
+            if len(cif_i.portlist.split(',')) == 1 and len(cif_i.portlist.split('-')) == 1:
+                misp_indicator.value = '{}|{}'.format(misp_indicator.value, cif_i.portlist)
+                if cif_i.itype in ['ipv4', 'ipv6']:
+                    misp_type = 'ip-dst|port'
+                elif cif_i.itype == 'fqdn':
+                    mis_type = 'hostname|port'
         
         misp_indicator.type = self.misp_attrib_type or misp_type
 
