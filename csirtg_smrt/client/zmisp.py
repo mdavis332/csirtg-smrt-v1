@@ -135,13 +135,6 @@ class MISP(Client):
         self.event = rule_event | feed_event
         self.attribute = rule_attr | feed_attr
 
-        rule_tags = self.rule_defaults.get('tags', [])
-        feed_tags = self.feed_defaults.get('tags', [])
-
-        self.tags = feed_tags or rule_tags
-        if not isinstance(self.tags, list):
-            self.tags = [self.tags]
-
         # if whole feed is same misp attrib type, allow manual input and don't resolve each
         self.misp_attrib_type = self.rule['feeds'][self.feed].get('itype') or \
            self.feed_defaults.get('itype') or self.rule.get('itype') or self.rule_defaults.get('itype')
@@ -192,11 +185,6 @@ class MISP(Client):
                 raise Exception(event)
 
         event.add_tag('source:{}'.format(self.remote))
-
-        # handle normal smrt rule tags (not those in to_misp section)
-        if self.tags and not self.event.get('tags'):
-            for tag in self.tags:
-                event.add_tag(tag)
 
         for setting, value in self.event.items():
             if setting == 'tags':
@@ -274,7 +262,7 @@ class MISP(Client):
         if not self.misp_attrib_type:
             cif_itype = cif_i.itype
             misp_type = CIF_TO_MISP_TYPES[cif_itype]
-            if misp_type == 'md5' and 'imphash' in cif_i.tags:
+            if misp_type == 'md5' and cif_i.tags and 'imphash' in cif_i.tags:
                 misp_type = 'imphash'
         misp_indicator.type = self.misp_attrib_type or misp_type
 
@@ -294,9 +282,16 @@ class MISP(Client):
         if not isinstance(data, list):
             data = [data]
 
+        count = 0
         for x in data:
             try:
                 misp_indicator = self._cif_i_to_misp_attr(x)
+                # handle adding tags here b/c by now they've been eval'd (if necessary)
+                # only apply i tags 1 time to event b/c they'll all be the same per feed/event
+                if count == 0 and x.tags:
+                    for tag in x.tags:
+                        misp_event.add_tag(tag)
+                count += 1
             except InvalidIndicator:
                 continue
             
