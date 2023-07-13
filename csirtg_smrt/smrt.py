@@ -476,7 +476,7 @@ def main():
 
         except Exception as e:
             logger.error(e)
-            raise SystemExit
+            raise e
 
     logger.info('starting...')
 
