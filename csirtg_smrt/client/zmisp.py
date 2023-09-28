@@ -50,6 +50,17 @@ If no destination event uuid field is specified in the rule, then a new event wi
   event for that week, etc. If 'permanent' is specified, a uuid is deterministically created from the
   provider and feed name, so the target MISP UUID should always be the same unless those change.
 
+  The 'uuid' field under event will also accept a string starting with 'group_by:' and ending with any
+  CIF Indicator() field like 'reference.' e.g., uuid: 'group_by:reference'
+  Whatever field comes after the 'group_by:' trigger (in this example, 'reference') will cause the same
+  deterministic UUID to be created from the _value_ of that field, ensuring that any indicators with that
+  same field value will always go to the same MISP event. e.g., if the 'reference' field contains a unique 
+  report value like 'http://tipfeed.tld/reports/001a,' then all indicators with that same URL will wind up
+  in the same MISP Event, and each different report URL will have its own unique MISP Event. This is useful
+  when you want to create a MISPEvent() for each unique report and ensure all indicators (MISP attributes)
+  associated with that report wind up in the same MISP event. Warning: group_by is 12x slower due to 
+  needing to iterate the indicator list multiple times for sorting.
+
 If you want to spoof the "creator org" field of the MISP event, you can specify an arbitrary str like 
   the 'provider' in the event dict of the yml rule under
   orgc_id. e.g.,
@@ -74,9 +85,10 @@ If you want to spoof the "creator org" field of the MISP event, you can specify 
 import logging
 
 from pymisp import PyMISP, MISPEvent, MISPAttribute, MISPOrganisation
-from csirtg_indicator.exceptions import InvalidIndicator
 from csirtg_indicator.utils.ztime import parse_timestamp
 from csirtg_smrt.client.plugin import Client
+from collections import defaultdict
+from operator import attrgetter
 from hashlib import md5
 from uuid import UUID
 
@@ -99,6 +111,17 @@ CIF_TO_MISP_TYPES = {
 SMRT_RULE_MISP_TOPLEVEL = 'to_misp'
 
 HUMAN_TS = {'hour', 'day', 'week', 'month', 'permanent'}
+
+# itertools.groupby requires a sorted list, so implement something custom for unsorted
+def groupby(seq, key=lambda x: x):
+    indices = defaultdict(list)
+    for i, elem in enumerate(seq):
+        #indices[key(elem)].append(i)
+        indices[key(elem)].append(elem)
+    return indices
+    # in tests, generators took slightly longer
+    #for k, idxs in indices.items():
+    #    yield k, (seq[i] for i in idxs)
 
 class MISP(Client):
 
@@ -139,20 +162,31 @@ class MISP(Client):
         self.misp_attrib_type = self.rule['feeds'][self.feed].get('itype') or \
            self.feed_defaults.get('itype') or self.rule.get('itype') or self.rule_defaults.get('itype')
 
-    def _set_event_id(self, event_id=None):
+        # everything with same group_by field goes into same MISP Event
+        # good for grouping indicators from a report if 'reference' field set to report URL like
+        # https://source.tld/reports/reportId504
+        self.group_by = self.event.get('uuid')[9:] if \
+            str(self.event.get('uuid')).startswith('group_by:') else None
+
+    def _get_event_uuid(self, event_id=None):
+        '''
+        input: event_id (str): UUIDv4 or in HUMAN_TS or other str value from group_by field
+        output: UUIDv4 (str) or -1 (int)
+        '''
         if not event_id:
             return -1
         
         # always return same UUIDv4 for same timestamp
         if event_id in HUMAN_TS:
-            if event_id != 'permanent':
-                event_id = str(UUID(md5(str(parse_timestamp(event_id)).encode('utf-8')).hexdigest(), version=4))
-            else:
+            if event_id == 'permanent':
                 # arbitrarily pick semi-static fields and order to create a hash/uuid
                 # in this case, we use the format provider:feed_name, e.g., nixspam.net:ssh
                 hash_candidate = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
                 event_id = str(UUID(md5(hash_candidate.encode('utf-8')).hexdigest(), version=4))
-            self.event['uuid'] = event_id
+            else:
+                event_id = str(UUID(md5(str(parse_timestamp(event_id)).encode('utf-8')).hexdigest(), version=4))
+        elif self.group_by:
+            event_id = str(UUID(md5(event_id.encode('utf-8')).hexdigest(), version=4))
 
         # ensure valid UUID
         try:
@@ -162,29 +196,29 @@ class MISP(Client):
 
         return event_id
     
-    def _get_misp_event(self):
+    def _get_misp_event(self, event_uuid):
         '''fetches the MISP event to which attributes should be added. if one is not specified or
         doesn't exist, a new event is created.
         input: None
         output: MISPEvent() object
         '''
-        dst_event_id = self._set_event_id(self.event.get('uuid'))
-        self.new_event = False
+        
+        new_event = False
         # do this to suppress error if event not found
         log_level = logging.getLogger('pymisp').level
         logging.getLogger('pymisp').setLevel(logging.CRITICAL)
-        event = self.client.get_event(dst_event_id, pythonify=True)
+        misp_event = self.client.get_event(event_uuid, pythonify=True)
         logging.getLogger('pymisp').setLevel(log_level)
         
         # if event doesn't exist, create new one
-        if event.get('errors'):
-            if event.get('errors', tuple())[0] == 404:
-                event = MISPEvent()
-                self.new_event = True
+        if misp_event.get('errors'):
+            if misp_event.get('errors', tuple())[0] == 404:
+                misp_event = MISPEvent()
+                new_event = True
             else:
-                raise Exception(event)
+                raise Exception(misp_event)
 
-        event.add_tag('source:{}'.format(self.remote))
+        misp_event.add_tag('source:{}'.format(self.remote))
 
         for setting, value in self.event.items():
             if setting == 'tags':
@@ -192,27 +226,30 @@ class MISP(Client):
                 if not isinstance(tags, list):
                     tags = [tags]
                 for tag in tags:
-                    event.add_tag(tag)
+                    misp_event.add_tag(tag)
                 continue
-            setattr(event, setting, value)
+            elif setting == 'uuid':
+                misp_event.uuid = event_uuid
+                continue
+            setattr(misp_event, setting, value)
 
-        if self.new_event:
+        if new_event:
             # MISP api contract requires the "info" field
-            if not getattr(event, 'info', None):
-                event.info = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
+            if not getattr(misp_event, 'info', None):
+                misp_event.info = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
 
             # reject remote sync edits
             # https://github.com/MISP/PyMISP/issues/239
-            event.locked = True
+            misp_event.locked = True
 
             # in MISP, it's customary to designate TLP at Event level rather than Attrib level
             tlp = self.rule_defaults.get('tlp', 'amber')
-            event.add_tag('tlp:{}'.format(tlp))
+            misp_event.add_tag('tlp:{}'.format(tlp))
 
             # handle spoofing a provided name
-            if getattr(event, 'orgc_id', None) and not isinstance(event.orgc_id, int):
-                provider = event.orgc_id
-                event.orgc_id = None
+            if getattr(misp_event, 'orgc_id', None) and not isinstance(misp_event.orgc_id, int):
+                provider = misp_event.orgc_id
+                misp_event.orgc_id = None
                 # Set orgc from provider field
                 # does orgc already exist?
                 instance_orgs = self.client.organisations()
@@ -222,19 +259,19 @@ class MISP(Client):
                         orgc.id = org['Organisation']['id']
                         orgc.name = org['Organisation']['name']
                         orgc.uuid = org['Organisation']['uuid']
-                        event.orgc = orgc
+                        misp_event.orgc = orgc
                         break
                 
                 # if orgc doesn't exist yet
-                if not getattr(event, 'orgc', None):
+                if not getattr(misp_event, 'orgc', None):
                     orgc = MISPOrganisation()
                     orgc.name = provider
                     orgc.description = 'created by csirtg-smrt'
                     orgc_resp = self.client.add_organisation(orgc)
                     orgc = orgc.from_dict(**orgc_resp['Organisation'])
-                    event.orgc = orgc
+                    misp_event.orgc = orgc
 
-        return event
+        return (misp_event, new_event)
 
     def _cif_i_to_misp_attr(self, cif_i):
         '''map fields of a single CIF indicator to those of a MISP attribute
@@ -287,32 +324,44 @@ class MISP(Client):
         return misp_indicator
 
     def indicators_create(self, data, **kwargs):
-        self._load_misp_settings_from_smrt_rule(**kwargs)
-        misp_event = self._get_misp_event()
-
         if not isinstance(data, list):
             data = [data]
 
-        count = 0
-        for x in data:
-            try:
-                misp_indicator = self._cif_i_to_misp_attr(x)
-                # handle adding tags here b/c by now they've been eval'd (if necessary)
-                # only apply i tags 1 time to event b/c they'll all be the same per feed/event
-                if count == 0 and x.tags:
-                    for tag in x.tags:
-                        misp_event.add_tag(tag)
-                count += 1
-            except InvalidIndicator:
-                continue
-            
-            misp_event.add_attribute(**misp_indicator)
+        self._load_misp_settings_from_smrt_rule(**kwargs)
 
-        if self.new_event:
-            event = self.client.add_event(misp_event)
+        if self.group_by:
+            iter_data = groupby(data, key=attrgetter(self.group_by))
         else:
-            event = self.client.update_event(misp_event)
-        if event.get('errors'):
-            raise Exception(event['errors'])
+            # arbitrarily force list of cif indicators (data) into similar format produced by groupby
+            # so we can iterate both the same
+            iter_data = groupby(data, key=lambda x: 'data')
+
+        for gb_value, v in iter_data.items():
+            # one counter for each UUID/MISPEvent
+            count = 0
+            # get the right MISPEvent once per UUID
+            if self.group_by:
+                dst_event_uuid = self._get_event_uuid(gb_value)
+            else:
+                dst_event_uuid = self._get_event_uuid(self.event.get('uuid'))
+            misp_event, new_event = self._get_misp_event(dst_event_uuid)
+            for cif_i in v:
+                if count == 0:
+                    # handle adding tags here b/c by now they've been eval'd (if necessary)
+                    # only apply i tags 1 time to event b/c they'll all be the same per feed/event
+                    if cif_i.tags:
+                        for tag in cif_i.tags:
+                            misp_event.add_tag(tag)
+                    count = 1
+
+                misp_indicator = self._cif_i_to_misp_attr(cif_i)
+                misp_event.add_attribute(**misp_indicator)
+
+            if new_event:
+                event = self.client.add_event(misp_event)
+            else:
+                event = self.client.update_event(misp_event)
+            if event.get('errors'):
+                raise Exception(event['errors'])
 
 Plugin = MISP
