@@ -31,6 +31,7 @@ class Rule(dict):
                 self.remote_pattern = d.get('remote_pattern')
                 self.token = d.get('token')
                 self.token_header = d.get('token_header')
+                self.token_secret = d.get('token_secret')
                 self.username = d.get("username")
                 self.password = d.get("password")
                 self.filters = d.get('filters')
@@ -64,6 +65,7 @@ class Rule(dict):
             self.remote_pattern = rule.get('remote_pattern')
             self.token = rule.get('token')
             self.token_header = rule.get('token_header')
+            self.token_secret = d.get('token_secret')
             self.username = rule.get('username')
             self.password = rule.get('password')
             self.filters = rule.get('filters')
@@ -102,6 +104,7 @@ class Rule(dict):
             'line_filter': self.line_filter,
             'limit': self.limit,
             'token': self.token,
+            'token_secret': self.token_secret,
             'key_file': self.key_file,
             'cert_file': self.cert_file
         }, sort_keys=True, indent=4, separators=(',', ': '))

@@ -218,7 +218,8 @@ class MISP(Client):
             else:
                 raise Exception(misp_event)
 
-        misp_event.add_tag('source:{}'.format(self.remote))
+        if self.remote:
+            misp_event.add_tag('source:{}'.format(self.remote))
 
         for setting, value in self.event.items():
             if setting == 'tags':

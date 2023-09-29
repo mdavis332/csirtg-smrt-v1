@@ -304,6 +304,23 @@ class Fetcher(object):
             )
             return
 
+        # TruStar 1.3 api fetcher
+        if self.fetcher == 'trustar13' or self.fetcher == 'trustar':
+            if self.rule.parser != 'indicator':
+                error_msg = """The SMRT rule for a TruStar fetcher must contain a "parser" key set to the value
+                of "indicator"."""
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            from .client.ztrustar13 import _TRUSTAR as trustarcli
+            cli = trustarcli(**self.rule.__dict__)
+
+            yield cli.indicators(
+                enclave_ids=self.filters.get('enclave_ids', []), 
+                lookback=(self.filters.get('lookback', {'hours': 1}))
+            )
+            return
+
         if self.fetcher == 'http':
             if self.no_fetch and os.path.isfile(self.cache):
                 self.logger.info('skipping fetch: {}'.format(self.cache))
