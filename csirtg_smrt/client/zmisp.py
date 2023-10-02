@@ -109,8 +109,8 @@ CIF_TO_MISP_TYPES = {
 }
 
 SMRT_RULE_MISP_TOPLEVEL = 'to_misp'
-
 HUMAN_TS = {'hour', 'day', 'week', 'month', 'permanent'}
+REPORT_NAME = 'from_smrt'
 
 # itertools.groupby requires a sorted list, so implement something custom for unsorted
 def groupby(seq, key=lambda x: x):
@@ -353,6 +353,11 @@ class MISP(Client):
                     if cif_i.tags:
                         for tag in cif_i.tags:
                             misp_event.add_tag(tag)
+                    # map additional_data field to MISPEventReport content, but only if not exists
+                    if cif_i.additional_data and not any(
+                        REPORT_NAME in x.name for x in misp_event.event_reports
+                    ):
+                        misp_event.add_event_report(name=REPORT_NAME, content=cif_i.additional_data)
                     count = 1
 
                 misp_indicator = self._cif_i_to_misp_attr(cif_i)

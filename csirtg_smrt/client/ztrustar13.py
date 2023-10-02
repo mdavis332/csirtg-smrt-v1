@@ -49,6 +49,7 @@ class _TRUSTAR(object):
 
         for report in reports:
             indicator = {}
+            indicator['additional_data'] = report.body
             indicator['description'], indicator['reporttime'] = report.title, report.created
             indicator['firsttime'], indicator['lasttime'] = report.time_began, report.updated
             indicator['uuid'] = report.id
