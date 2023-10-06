@@ -4,4 +4,5 @@ stix>=1.0,<2.0
 libtaxii>=1.1.119
 maec
 pymisp>=2.4.172
+trustar
 -r requirements.txt

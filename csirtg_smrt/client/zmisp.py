@@ -61,6 +61,18 @@ If no destination event uuid field is specified in the rule, then a new event wi
   associated with that report wind up in the same MISP event. Warning: group_by is 12x slower due to 
   needing to iterate the indicator list multiple times for sorting.
 
+The trigger 'evaluated_indicator_field:' can be used to add the info from the given field in the first
+  indicator of a batch. e.g., evaluated_indicator_field:additional_data
+The special attribute "report" will be used to add that info to an event report within the MISP event.
+  Using the above evaluated_indicator_field trigger, a report can be added to the MISP event containing
+  the text from the additional_data field using something like the below:
+  defaults:
+    to_misp:
+      event:
+        uuid: group_by:reference
+        info: evaluated_indicator_field:description
+        report: evaluated_indicator_field:additional_data
+
 If you want to spoof the "creator org" field of the MISP event, you can specify an arbitrary str like 
   the 'provider' in the event dict of the yml rule under
   orgc_id. e.g.,
@@ -167,6 +179,8 @@ class MISP(Client):
         # https://source.tld/reports/reportId504
         self.group_by = self.event.get('uuid')[9:] if \
             str(self.event.get('uuid')).startswith('group_by:') else None
+        
+        self.event_field_from_evald_indicator = []
 
     def _get_event_uuid(self, event_id=None):
         '''
@@ -222,6 +236,9 @@ class MISP(Client):
             misp_event.add_tag('source:{}'.format(self.remote))
 
         for setting, value in self.event.items():
+            if isinstance(value, str) and value.startswith('evaluated_indicator_field:'):
+                self.event_field_from_evald_indicator.append((setting, value[26:]))
+                continue
             if setting == 'tags':
                 tags = value
                 if not isinstance(tags, list):
@@ -345,6 +362,7 @@ class MISP(Client):
                 dst_event_uuid = self._get_event_uuid(gb_value)
             else:
                 dst_event_uuid = self._get_event_uuid(self.event.get('uuid'))
+
             misp_event, new_event = self._get_misp_event(dst_event_uuid)
             for cif_i in v:
                 if count == 0:
@@ -354,10 +372,18 @@ class MISP(Client):
                         for tag in cif_i.tags:
                             misp_event.add_tag(tag)
                     # map additional_data field to MISPEventReport content, but only if not exists
-                    if cif_i.additional_data and not any(
-                        REPORT_NAME in x.name for x in misp_event.event_reports
-                    ):
-                        misp_event.add_event_report(name=REPORT_NAME, content=cif_i.additional_data)
+                    #if cif_i.additional_data and not any
+                    # apply any evaluated indicator values to the event
+                    if self.event_field_from_evald_indicator:
+                        for setting, cif_field in self.event_field_from_evald_indicator:
+                            value = getattr(cif_i, cif_field)
+                            if setting == 'report':
+                                if value and not any(
+                                    REPORT_NAME in x.name for x in misp_event.event_reports
+                                ):
+                                    misp_event.add_event_report(name=REPORT_NAME, content=cif_i.additional_data)
+                                continue
+                            setattr(misp_event, setting, value)
                     count = 1
 
                 misp_indicator = self._cif_i_to_misp_attr(cif_i)
