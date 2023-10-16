@@ -12,8 +12,6 @@ class _TRUSTAR(object):
     __name__ = 'trustar13'
 
     def __init__(self, **kwargs):
-        logger.info(kwargs)
-
         api_key = kwargs.get('token')
         api_secret = kwargs.get('token_secret')
         client_metatag = 'csirtg-smrt {}'.format(VERSION)
