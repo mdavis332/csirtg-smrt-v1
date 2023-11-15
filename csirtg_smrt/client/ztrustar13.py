@@ -48,8 +48,8 @@ class _TRUSTAR(object):
         for report in reports:
             indicator = {}
             indicator['additional_data'] = report.body
-            indicator['description'], indicator['reporttime'] = report.title, report.created
-            indicator['firsttime'], indicator['lasttime'] = report.time_began, report.updated
+            indicator['description'], indicator['reporttime'] = report.title, report.time_began
+            indicator['firsttime'], indicator['lasttime'] = report.created, report.updated
             indicator['uuid'] = report.id
             indicator['reference'] = 'https://station.trustar.co/constellation/reports/{}'.format(report.id)
             indicator['tags'] = set()
