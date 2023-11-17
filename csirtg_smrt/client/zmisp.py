@@ -192,13 +192,13 @@ class MISP(Client):
         
         # always return same UUIDv4 for same timestamp
         if event_id in HUMAN_TS:
-            if event_id == 'permanent':
-                # arbitrarily pick semi-static fields and order to create a hash/uuid
-                # in this case, we use the format provider:feed_name, e.g., nixspam.net:ssh
-                hash_candidate = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
-                event_id = str(UUID(md5(hash_candidate.encode('utf-8')).hexdigest(), version=4))
-            else:
-                event_id = str(UUID(md5(str(parse_timestamp(event_id)).encode('utf-8')).hexdigest(), version=4))
+            # arbitrarily pick semi-static fields and order to create a hash/uuid
+            # in this case, we use the format provider:feed_name, e.g., nixspam.net:ssh
+            hash_candidate = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
+            if event_id != 'permanent':
+                # if something like 'month' for event_id, then add it on to the hash_candidate
+                hash_candidate += ':{}'.format(str(parse_timestamp(event_id)))
+            event_id = str(UUID(md5(hash_candidate.encode('utf-8')).hexdigest(), version=4))
         elif self.group_by:
             event_id = str(UUID(md5(event_id.encode('utf-8')).hexdigest(), version=4))
 
