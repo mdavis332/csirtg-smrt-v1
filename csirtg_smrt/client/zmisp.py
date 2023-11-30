@@ -110,7 +110,7 @@ CIF_TO_MISP_TYPES = {
     'ipv4': 'ip-src',
     'ipv6': 'ip-src',
     'asn': 'AS',
-    'fqdn': 'hostname',
+    'fqdn': 'domain',
     'email': 'email',
     'md5': 'md5',
     'sha1': 'sha1',
@@ -328,7 +328,7 @@ class MISP(Client):
                 if cif_i.itype in ['ipv4', 'ipv6']:
                     misp_type = 'ip-dst|port'
                 elif cif_i.itype == 'fqdn':
-                    mis_type = 'hostname|port'
+                    misp_type = 'hostname|port'
         
         misp_indicator.type = self.misp_attrib_type or misp_type
 
