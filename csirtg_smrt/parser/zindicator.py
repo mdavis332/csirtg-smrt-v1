@@ -19,6 +19,7 @@ class _Indicator(Parser):
                 for k, v in defaults.items():
                     i[k] = v
 
+                self.eval_obs(i)
                 yield i
 
 
