@@ -61,17 +61,18 @@ If no destination event uuid field is specified in the rule, then a new event wi
   associated with that report wind up in the same MISP event. Warning: group_by is 12x slower due to 
   needing to iterate the indicator list multiple times for sorting.
 
-The trigger 'evaluated_indicator_field:' can be used to add the info from the given field in the first
-  indicator of a batch. e.g., evaluated_indicator_field:additional_data
+The built-in smrt "eval()" feature can be used to add the info from the given field in the first
+  indicator of a batch. e.g., 'eval("{additional_data}".format(**obs))'
 The special attribute "report" will be used to add that info to an event report within the MISP event.
-  Using the above evaluated_indicator_field trigger, a report can be added to the MISP event containing
+  It can be paired with another special attribute for the title of the report: "report_name"
+  Using the above eval trigger, a report can be added to the MISP event containing
   the text from the additional_data field using something like the below:
   defaults:
     to_misp:
       event:
         uuid: group_by:reference
-        info: evaluated_indicator_field:description
-        report: evaluated_indicator_field:additional_data
+        report: eval('{additional_data}'.format(**obs))
+        report_name: eval('{description}'.format(**obs))
 
 If you want to spoof the "creator org" field of the MISP event, you can specify an arbitrary str like 
   the 'provider' in the event dict of the yml rule under
@@ -154,8 +155,6 @@ class MISP(Client):
 
     def _load_misp_settings_from_smrt_rule(self, **kwargs):
         self.rule = dict(kwargs['rule'].items())
-        # handle any 'eval's in the rule
-        #self.rule['defaults'] = kwargs['parser'].eval_obs(self.rule.get('defaults', {}))
         self.event = {}
         self.attribute = {}
         self.feed = kwargs.get('feed', '')
@@ -217,7 +216,7 @@ class MISP(Client):
         output: MISPEvent() object
         '''
         
-        new_event = False
+        is_new_event = False
         # do this to suppress error if event not found
         log_level = logging.getLogger('pymisp').level
         logging.getLogger('pymisp').setLevel(logging.CRITICAL)
@@ -228,30 +227,14 @@ class MISP(Client):
         if misp_event.get('errors'):
             if misp_event.get('errors', tuple())[0] == 404:
                 misp_event = MISPEvent()
-                new_event = True
+                is_new_event = True
             else:
                 raise Exception(misp_event)
 
         if self.remote:
             misp_event.add_tag('source:{}'.format(self.remote))
 
-        for setting, value in self.event.items():
-            if isinstance(value, str) and value.startswith('evaluated_indicator_field:'):
-                self.event_field_from_evald_indicator.append((setting, value[26:]))
-                continue
-            if setting == 'tags':
-                tags = value
-                if not isinstance(tags, list):
-                    tags = [tags]
-                for tag in tags:
-                    misp_event.add_tag(tag)
-                continue
-            elif setting == 'uuid':
-                misp_event.uuid = event_uuid
-                continue
-            setattr(misp_event, setting, value)
-
-        if new_event:
+        if is_new_event:
             # MISP api contract requires the "info" field
             if not getattr(misp_event, 'info', None):
                 misp_event.info = '{}:{}'.format(self.rule['defaults']['provider'], self.feed)
@@ -289,7 +272,33 @@ class MISP(Client):
                     orgc = orgc.from_dict(**orgc_resp['Organisation'])
                     misp_event.orgc = orgc
 
-        return (misp_event, new_event)
+        return (misp_event, is_new_event)
+
+    def _set_misp_event_values(self, misp_event, event_uuid):
+        """ takes the MISPEvent() object and uuid for retrieving potentially eval'd fields. 
+        Populates MISPEvent obj with values from smrt rule.
+        """
+        for setting, value in self.event.items():
+            if setting == 'tags':
+                tags = value
+                if not isinstance(tags, list):
+                    tags = [tags]
+                for tag in tags:
+                    misp_event.add_tag(tag)
+                continue
+            elif setting == 'uuid':
+                misp_event.uuid = event_uuid
+                continue
+            elif setting == 'report_name':
+                continue # report_name means nothing by itself
+            elif setting == 'report':
+                report_name = self.event['report_name'] if self.event.get('report_name') else REPORT_NAME
+                if value and not any(
+                    report_name in x.name for x in misp_event.event_reports
+                ):
+                    misp_event.add_event_report(name=report_name, content=value)
+                continue
+            setattr(misp_event, setting, value)
 
     def _cif_i_to_misp_attr(self, cif_i):
         '''map fields of a single CIF indicator to those of a MISP attribute
@@ -363,33 +372,21 @@ class MISP(Client):
             else:
                 dst_event_uuid = self._get_event_uuid(self.event.get('uuid'))
 
-            misp_event, new_event = self._get_misp_event(dst_event_uuid)
+            misp_event, is_new_event = self._get_misp_event(dst_event_uuid)
             for cif_i in v:
                 if count == 0:
+                    self._set_misp_event_values(misp_event, dst_event_uuid)
                     # handle adding tags here b/c by now they've been eval'd (if necessary)
                     # only apply i tags 1 time to event b/c they'll all be the same per feed/event
                     if cif_i.tags:
                         for tag in cif_i.tags:
                             misp_event.add_tag(tag)
-                    # map additional_data field to MISPEventReport content, but only if not exists
-                    #if cif_i.additional_data and not any
-                    # apply any evaluated indicator values to the event
-                    if self.event_field_from_evald_indicator:
-                        for setting, cif_field in self.event_field_from_evald_indicator:
-                            value = getattr(cif_i, cif_field)
-                            if setting == 'report':
-                                if value and not any(
-                                    REPORT_NAME in x.name for x in misp_event.event_reports
-                                ):
-                                    misp_event.add_event_report(name=REPORT_NAME, content=cif_i.additional_data)
-                                continue
-                            setattr(misp_event, setting, value)
                     count = 1
 
                 misp_indicator = self._cif_i_to_misp_attr(cif_i)
                 misp_event.add_attribute(**misp_indicator)
 
-            if new_event:
+            if is_new_event:
                 event = self.client.add_event(misp_event)
             else:
                 event = self.client.update_event(misp_event)
