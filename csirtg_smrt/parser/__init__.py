@@ -99,9 +99,8 @@ class Parser(object):
     def _defaults(self):
         defaults = copy.deepcopy(self.rule.defaults)
 
-        if self.rule.feeds[self.feed].get('defaults'):
-            for d in self.rule.feeds[self.feed].get('defaults'):
-                defaults[d] = self.rule.feeds[self.feed]['defaults'][d]
+        for d in self.rule.feeds[self.feed].get('defaults', []):
+            defaults[d] = copy.deepcopy(self.rule.feeds[self.feed]['defaults'][d])
 
         return defaults
 
