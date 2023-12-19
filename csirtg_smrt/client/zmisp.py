@@ -95,6 +95,7 @@ If you want to spoof the "creator org" field of the MISP event, you can specify 
 
 '''
 
+import copy
 import logging
 
 from pymisp import PyMISP, MISPEvent, MISPAttribute, MISPOrganisation
@@ -153,6 +154,16 @@ class MISP(Client):
     def stop(self):
         return True
 
+    def _write_evald_misp_fields(self, orig_dict, cif_dict, parser):
+        """inputs: dict like self.event, cif indicator converted to dict, and zindicator Parser() instance
+        eval the to_misp fields with respect to the cif dict so misp fields have access to all values in the
+        cif indicator dict.
+        """
+        temp_event_fields_dict = {SMRT_RULE_MISP_TOPLEVEL: copy.deepcopy(orig_dict)}
+        merged_dict = cif_dict | temp_event_fields_dict
+        parser.eval_obs(merged_dict)
+        return orig_dict | merged_dict.get(SMRT_RULE_MISP_TOPLEVEL, {})
+
     def _load_misp_settings_from_smrt_rule(self, **kwargs):
         self.rule = dict(kwargs['rule'].items())
         self.event = {}
@@ -178,8 +189,6 @@ class MISP(Client):
         # https://source.tld/reports/reportId504
         self.group_by = self.event.get('uuid')[9:] if \
             str(self.event.get('uuid')).startswith('group_by:') else None
-        
-        self.event_field_from_evald_indicator = []
 
     def _get_event_uuid(self, event_id=None):
         '''
@@ -274,11 +283,11 @@ class MISP(Client):
 
         return (misp_event, is_new_event)
 
-    def _set_misp_event_values(self, misp_event, event_uuid):
+    def _set_misp_event_values(self, misp_event, event_uuid, evald_rule_event_dict):
         """ takes the MISPEvent() object and uuid for retrieving potentially eval'd fields. 
         Populates MISPEvent obj with values from smrt rule.
         """
-        for setting, value in self.event.items():
+        for setting, value in evald_rule_event_dict.items():
             if setting == 'tags':
                 tags = value
                 if not isinstance(tags, list):
@@ -292,7 +301,7 @@ class MISP(Client):
             elif setting == 'report_name':
                 continue # report_name means nothing by itself
             elif setting == 'report':
-                report_name = self.event['report_name'] if self.event.get('report_name') else REPORT_NAME
+                report_name = evald_rule_event_dict.get('report_name') or REPORT_NAME
                 if value and not any(
                     report_name in x.name for x in misp_event.event_reports
                 ):
@@ -375,7 +384,9 @@ class MISP(Client):
             misp_event, is_new_event = self._get_misp_event(dst_event_uuid)
             for cif_i in v:
                 if count == 0:
-                    self._set_misp_event_values(misp_event, dst_event_uuid)
+                    # refresh misp setting once for this batch in case eval'd fields exist
+                    evald_rule_fields = self._write_evald_misp_fields(self.event, cif_i.__dict__(), kwargs['parser'])
+                    self._set_misp_event_values(misp_event, dst_event_uuid, evald_rule_fields)
                     # handle adding tags here b/c by now they've been eval'd (if necessary)
                     # only apply i tags 1 time to event b/c they'll all be the same per feed/event
                     if cif_i.tags:
