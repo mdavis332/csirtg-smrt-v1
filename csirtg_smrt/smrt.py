@@ -126,12 +126,14 @@ class Smrt(object):
                 if f.startswith('.'):
                     continue
 
-                if os.path.isdir(f):
+                path = os.path.join(rule, f)
+
+                if os.path.isdir(path):
                     continue
 
-                self.logger.info("processing {0}/{1}".format(rule, f))
+                self.logger.info("processing {0}".format(path))
                 try:
-                    r = Rule(path=os.path.join(rule, f))
+                    r = Rule(path=path)
                 except RuleUnsupported as e:
                     logger.error(e)
                     continue
