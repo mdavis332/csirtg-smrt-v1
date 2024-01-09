@@ -209,11 +209,13 @@ class Smrt(object):
         if isinstance(i, dict):
             i = Indicator(**i)
 
-        if not i.firsttime:
-            i.firsttime = i.lasttime
-
         if not i.reporttime:
             i.reporttime = arrow.utcnow().datetime
+
+        if not i.lasttime:
+            i.lasttime = i.firsttime
+        elif not i.firsttime:
+            i.firsttime = i.lasttime
 
         if not i.group:
             i.group = 'everyone'
