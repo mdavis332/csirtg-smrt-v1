@@ -3,7 +3,6 @@ from csirtg_smrt.constants import VERSION
 from datetime import datetime, timedelta
 from trustar import TruStar, datetime_to_millis
 import logging
-import uuid
 
 logger = logging.getLogger(__name__)
 
