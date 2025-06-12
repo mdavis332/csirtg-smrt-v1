@@ -11,15 +11,16 @@ class _Indicator(Parser):
 
         for l in self.fetcher.process():
             for e in l:
-                i = {}
-                e = e.__dict__()
+                i = {} # will become copy of Indicator() dict
+                e = e.__dict__() # Indicator() obj as dict, basically deepcopying e into i, then
+                # overwriting any i values with things specified in smrt rule defaults section
                 for k, v in e.items():
                     i[k] = v
 
                 for k, v in defaults.items():
                     i[k] = v
 
-                self.eval_obs(i)
+                self.eval_obs(i, original_indicator=e)
                 yield i
 
 
