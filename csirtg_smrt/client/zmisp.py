@@ -252,10 +252,6 @@ class MISP(Client):
             # https://github.com/MISP/PyMISP/issues/239
             misp_event.locked = True
 
-            # in MISP, it's customary to designate TLP at Event level rather than Attrib level
-            tlp = self.rule_defaults.get('tlp', 'amber')
-            misp_event.add_tag('tlp:{}'.format(tlp))
-
             # handle spoofing a provided name
             if getattr(misp_event, 'orgc_id', None) and not isinstance(misp_event.orgc_id, int):
                 provider = misp_event.orgc_id
@@ -371,7 +367,7 @@ class MISP(Client):
             # arbitrarily force list of cif indicators (data) into similar format produced by groupby
             # so we can iterate both the same
             iter_data = groupby(data, key=lambda x: 'data')
-
+        
         for gb_value, v in iter_data.items():
             # one counter for each UUID/MISPEvent
             count = 0
@@ -382,6 +378,7 @@ class MISP(Client):
                 dst_event_uuid = self._get_event_uuid(self.event.get('uuid'))
 
             misp_event, is_new_event = self._get_misp_event(dst_event_uuid)
+
             for cif_i in v:
                 if count == 0:
                     # refresh misp setting once for this batch in case eval'd fields exist
@@ -392,6 +389,13 @@ class MISP(Client):
                     if cif_i.tags:
                         for tag in cif_i.tags:
                             misp_event.add_tag(tag)
+                    # in MISP, it's customary to designate TLP at Event level rather than Attrib level
+                    if is_new_event:
+                        tlp = self.rule_defaults.get('tlp', 'amber')
+                        # use Indicator TLP if present since it could have been eval'd
+                        if cif_i.tlp:
+                            tlp = cif_i.tlp 
+                        misp_event.add_tag('tlp:{}'.format(tlp))
                     count = 1
 
                 misp_indicator = self._cif_i_to_misp_attr(cif_i)
