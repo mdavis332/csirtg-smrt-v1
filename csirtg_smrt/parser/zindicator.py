@@ -11,7 +11,7 @@ class _Indicator(Parser):
 
         for l in self.fetcher.process():
             for e in l:
-                i = {} # will become copy of Indicator() dict
+                i = {} # will become copy of Indicator() dict with rule defaults copied over
                 e = e.__dict__() # Indicator() obj as dict, basically deepcopying e into i, then
                 # overwriting any i values with things specified in smrt rule defaults section
                 for k, v in e.items():

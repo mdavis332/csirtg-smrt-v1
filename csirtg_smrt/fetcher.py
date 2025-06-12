@@ -321,6 +321,23 @@ class Fetcher(object):
             )
             return
 
+        # AlienVault OTX api fetcher
+        if self.fetcher == 'otx':
+            if self.rule.parser != 'indicator':
+                error_msg = """The SMRT rule for an OTX fetcher must contain a "parser" key set to the value
+                of "indicator"."""
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
+
+            from .client.zotx import _OTX as otxcli
+            cli = otxcli(**self.rule.__dict__)
+
+            yield cli.indicators(
+                group_id=self.filters.get('group_id', ''), 
+                lookback=self.filters.get('lookback', {'hours': 1})
+            )
+            return
+
         if self.fetcher == 'http':
             if self.no_fetch and os.path.isfile(self.cache):
                 self.logger.info('skipping fetch: {}'.format(self.cache))
